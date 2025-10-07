@@ -1,76 +1,78 @@
 #ifndef CONFIG_JSON_HPP
 #define CONFIG_JSON_HPP
 
+#include <filesystem>
 #include <fstream>
+#include <stdexcept>
+#include <string>
 #include <nlohmann/json.hpp>
 
-struct SConfig {
-    std::string m_Token = "NONE";
+namespace fs = std::filesystem;
+
+struct Config {
+    std::string token;
+
+    void validate() const {
+        if (token.empty() || token == "NONE") {
+            throw std::runtime_error("Invalid token in config");
+        }
+    }
+
+    static Config defaults() {
+        return Config{
+            .token = "NONE"
+        };
+    }
 };
 
-void to_json(nlohmann::json& j, const SConfig& c) {
-    j = nlohmann::json{
-                {"token", c.m_Token},
-            };
-}
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Config, token)
 
-void from_json(const nlohmann::json& j, SConfig& c) {
-    j.at("token").get_to(c.m_Token);
-}
-
-enum EConfigResultCode {
-    // common
-    SUCCESS = 0,
-    ERROR_OPENING_FILE,
-
-    // create
-    FILE_EXISTS,
-
-    // load
-    FILE_NOT_EXISTS,
-};
-
-class CConfig final {
-    SConfig m_Config;
-
+class ConfigLoader {
 public:
-    CConfig() = default;
+    static Config load_or_create(const fs::path &path) {
+        if (!fs::exists(path)) {
+            create_default(path);
+            throw std::runtime_error(
+                "Config file created at '" + path.string() +
+                "'. Please edit it and restart."
+            );
+        }
 
-    bool ConfigFileExists(const char *pPath) {
-        return std::filesystem::exists(pPath);
+        return load(path);
     }
 
-    EConfigResultCode CreateTemplateConfig(const char *pPath) {
-        if (ConfigFileExists(pPath)) {
-            return FILE_EXISTS;
+    static Config load(const fs::path &path) {
+        std::ifstream file(path);
+        if (!file) {
+            throw std::runtime_error("Cannot open config file: " + path.string());
         }
 
-        std::ofstream FileStream(pPath);
-        if (!FileStream.is_open()) {
-            return ERROR_OPENING_FILE;
+        nlohmann::json j;
+        try {
+            file >> j;
+        } catch (const nlohmann::json::exception &e) {
+            throw std::runtime_error("Invalid JSON in config: " + std::string(e.what()));
         }
 
-        FileStream << nlohmann::json(m_Config).dump(4);
-        return SUCCESS;
+        Config cfg = j.get<Config>();
+
+        if (auto *env_token = std::getenv("BOT_TOKEN")) {
+            cfg.token = env_token;
+        }
+
+        cfg.validate();
+        return cfg;
     }
 
-    EConfigResultCode LoadFromFile(const char *pPath) {
-        if (!ConfigFileExists(pPath)) {
-            return FILE_NOT_EXISTS;
+    static void create_default(const fs::path &path) {
+        std::ofstream file(path);
+        if (!file) {
+            throw std::runtime_error("Cannot create config file: " + path.string());
         }
 
-        std::ifstream FileStream(pPath);
-        if (!FileStream.is_open()) {
-            return ERROR_OPENING_FILE;
-        }
-
-        nlohmann::json Data = nlohmann::json::parse(FileStream);
-        m_Config = Data.template get<SConfig>();
-
-        return SUCCESS;
+        nlohmann::json j = Config::defaults();
+        file << j.dump(4) << '\n';
     }
-
-    [[nodiscard]] SConfig Values() const { return m_Config; }
 };
 
 #endif // CONFIG_JSON_HPP

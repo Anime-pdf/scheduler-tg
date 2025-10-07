@@ -21,29 +21,15 @@ dd::task<void> coro_main(tgbm::bot& bot) {
 #define CONFIG_FILE "config.json"
 
 int main() {
-    CConfig Config;
-    if (!Config.ConfigFileExists(CONFIG_FILE)) {
-        switch (Config.CreateTemplateConfig(CONFIG_FILE)) {
-            case SUCCESS:
-                g_Logger.Log(LogLevel::Info, "'{}' not found, created a template", CONFIG_FILE);
-                return 0;
-            case ERROR_OPENING_FILE:
-                g_Logger.Log(LogLevel::Info, "Can't open '{}' for writing", CONFIG_FILE);
-                return 1;
-            default:
-                g_Logger.Log(LogLevel::Info, "Unknown error");
-                return 69;
-        }
-    }
-
-    if (Config.LoadFromFile(CONFIG_FILE) == ERROR_OPENING_FILE) {
-        g_Logger.Log(LogLevel::Info, "Can't open '{}' for reading", CONFIG_FILE);
+    Config cfg;
+    try {
+        cfg = ConfigLoader::load_or_create(CONFIG_FILE);
+    } catch (const std::exception& e) {
+        g_Logger.Log(LogLevel::Error, "Config error: {}", e.what());
         return 1;
     }
-
     g_Logger.Log(LogLevel::Info, "Starting up");
-
-    tgbm::bot bot{Config.Values().m_Token};
+    tgbm::bot bot{cfg.token};
 
     coro_main(bot).start_and_detach();
     bot.run();
